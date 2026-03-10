@@ -1,0 +1,18 @@
+[
+  {
+    "email": "tony@mail.com",
+    "password": "$2b$10$8J.1S9n1bEF4beu10zMyceS443pjmTbFd1M0GZXp25qzy73oYeMjm",
+    "firstName": "Tony",
+    "lastName": "Stark",
+    "phone": "0812345678",
+    "workplace": "Stark Industries"
+  },
+  {
+    "email": "test1",
+    "password": "$2b$10$vB6mgVNtQsTvHKjWPJql4ulZIch0nB3YU/HmxuJr4jmryoHeocJeS",
+    "firstName": "test",
+    "lastName": "vevee",
+    "phone": "0147852369",
+    "workplace": "Msu"
+  }
+]
