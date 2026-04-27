@@ -144,5 +144,15 @@ router.get('/categories', async (req, res) => {
         res.status(500).json({ error: err.message });
     }
 });
+// ใน notificationRoutes.js (ตรวจสอบจุดนี้)
+router.get('/notifications/:email', async (req, res) => {
+    const { data, error } = await supabase
+        .from('notifications')
+        .select('*') // มั่นใจว่าได้เลือกทุกคอลัมน์รวมถึง 'type' และ 'activity_id'
+        .eq('user_email', req.params.email)
+        .order('created_at', { ascending: false });
+    res.json(data);
+});
+
 
 module.exports = router;
