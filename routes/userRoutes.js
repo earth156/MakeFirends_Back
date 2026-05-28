@@ -2,7 +2,6 @@ const express = require('express');
 const supabase = require('../config/supabase');
 const upload = require('../middlewares/upload');
 const router = express.Router();
-const { Resend } = require('resend');
 const bcrypt = require('bcrypt'); // เพิ่มไลบรารีสำหรับเข้ารหัสผ่าน
 
 // --- 1. GET: ค้นหาสมาชิกทั้งหมด ---
@@ -544,31 +543,49 @@ router.post('/forgot-password', async (req, res) => {
         // 3. บันทึก OTP ลงในฐานข้อมูลชั่วคราว
         await supabase.from('users').update({ reset_otp: otp }).eq('email', email);
 
-        // 4. ตั้งค่าบริการส่งอีเมลผ่าน Resend
-        const resend = new Resend(process.env.RESEND_API_KEY || 're_ใส่รหัสAPI_ของคุณที่นี่');
+        // 4. ตั้งค่าบริการส่งอีเมลผ่าน Brevo HTTP API
+        const BREVO_API_KEY = process.env.BREVO_API_KEY;
 
-        // 5. ส่งอีเมล
-        const data = await resend.emails.send({
-            from: 'onboarding@resend.dev', // ใช้อีเมลสำหรับทดสอบของ Resend
-            to: email,
-            subject: 'รหัส OTP สำหรับรีเซ็ตรหัสผ่าน - Activity Hub',
-            html: `
-                <div style="font-family: Arial, sans-serif; text-align: center; padding: 20px;">
-                    <h2>รีเซ็ตรหัสผ่าน</h2>
-                    <p>รหัส OTP ของคุณคือ:</p>
-                    <div style="background-color: #f3f0ff; color: #6210CC; padding: 15px 25px; border-radius: 5px; display: inline-block; margin-top: 20px; font-size: 24px; font-weight: bold; letter-spacing: 5px;">
-                        ${otp}
+        const response = await fetch('https://api.brevo.com/v3/smtp/email', {
+            method: 'POST',
+            headers: {
+                'accept': 'application/json',
+                'api-key': BREVO_API_KEY,
+                'content-type': 'application/json'
+            },
+            body: JSON.stringify({
+                sender: { 
+                    name: 'Make Friends App', 
+                    email: 'earthjirawat1567@gmail.com' 
+                },
+                to: [{ email: email }],
+                subject: 'รหัส OTP สำหรับรีเซ็ตรหัสผ่าน - Make Friends App',
+                htmlContent: `
+                    <div style="font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; text-align: center; padding: 30px; background-color: #f4f4f9; border-radius: 10px;">
+                        <div style="max-width: 500px; margin: 0 auto; background-color: #ffffff; padding: 30px; border-radius: 12px; box-shadow: 0 4px 10px rgba(0,0,0,0.05);">
+                            <h2 style="color: #6210CC; margin-bottom: 20px;">รีเซ็ตรหัสผ่าน</h2>
+                            <p style="color: #555; font-size: 16px;">รหัส OTP สำหรับตั้งรหัสผ่านใหม่ของคุณคือ:</p>
+                            <div style="background-color: #f3f0ff; border: 2px dashed #6210CC; color: #6210CC; padding: 20px 30px; border-radius: 8px; display: inline-block; margin: 25px 0; font-size: 36px; font-weight: bold; letter-spacing: 10px;">
+                                ${otp}
+                            </div>
+                            <p style="color: #888; font-size: 14px;">รหัสนี้มีอายุการใช้งาน 1 ชั่วโมง</p>
+                        </div>
                     </div>
-                </div>
-            `
+                `
+            })
         });
-        console.log('✅ Forgot Password Email Sent via Resend:', data.id);
-        
+
+        if (!response.ok) {
+            const errData = await response.json();
+            throw new Error(JSON.stringify(errData));
+        }
+        console.log('✅ Forgot Password Email Sent via Brevo HTTP API to:', email);
+
         res.status(200).json({ message: "ส่งรหัส OTP ไปยังอีเมลแล้ว" });
 
     } catch (err) {
         console.error("Forgot Password Error:", err);
-        res.status(500).json({ error: "เกิดข้อผิดพลาดในการส่งอีเมล" });
+        res.status(500).json({ error: "เกิดข้อผิดพลาดในการส่งอีเมล: " + err.message });
     }
 });
 
