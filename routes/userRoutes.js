@@ -2,7 +2,7 @@ const express = require('express');
 const supabase = require('../config/supabase');
 const upload = require('../middlewares/upload');
 const router = express.Router();
-const nodemailer = require('nodemailer');
+const { Resend } = require('resend');
 const bcrypt = require('bcrypt'); // เพิ่มไลบรารีสำหรับเข้ารหัสผ่าน
 
 // --- 1. GET: ค้นหาสมาชิกทั้งหมด ---
@@ -544,27 +544,25 @@ router.post('/forgot-password', async (req, res) => {
         // 3. บันทึก OTP ลงในฐานข้อมูลชั่วคราว
         await supabase.from('users').update({ reset_otp: otp }).eq('email', email);
 
-        // 4. ตั้งค่าบริการส่งอีเมล (ใช้ Gmail ตัวอย่าง)
-        // หมายเหตุ: ต้องไปสร้าง App Password ในบัญชี Google เพื่อนำรหัสมาใส่ตรงช่อง pass
-        const transporter = nodemailer.createTransport({
-            service: 'gmail',
-            auth: {
-                user: 'earthjirawat156@gmail.com',   // เปลี่ยนเป็นอีเมล Gmail ของคุณ
-                pass: 'nvemhaoklqvgumaj'       // เปลี่ยนเป็นรหัส App Password (16 หลัก)
-            }
-        });
+        // 4. ตั้งค่าบริการส่งอีเมลผ่าน Resend
+        const resend = new Resend(process.env.RESEND_API_KEY || 're_ใส่รหัสAPI_ของคุณที่นี่');
 
         // 5. ส่งอีเมล
-        const mailOptions = {
-            from: '"MakeFriends Support" <earthjirawat156@gmail.com>',
+        const data = await resend.emails.send({
+            from: 'onboarding@resend.dev', // ใช้อีเมลสำหรับทดสอบของ Resend
             to: email,
-            subject: 'รหัส OTP สำหรับรีเซ็ตรหัสผ่าน - MakeFriends App',
-            text: `รหัส OTP ของคุณคือ: ${otp}\n\nกรุณานำรหัสนี้ไปกรอกในแอปพลิเคชันเพื่อตั้งรหัสผ่านใหม่ครับ`
-        };
-
-        // ใช้ await แทน callback เพื่อจับ Error ได้ปลอดภัยกว่า
-        const info = await transporter.sendMail(mailOptions);
-        console.log('✅ Forgot Password Email Sent:', info.response);
+            subject: 'รหัส OTP สำหรับรีเซ็ตรหัสผ่าน - Activity Hub',
+            html: `
+                <div style="font-family: Arial, sans-serif; text-align: center; padding: 20px;">
+                    <h2>รีเซ็ตรหัสผ่าน</h2>
+                    <p>รหัส OTP ของคุณคือ:</p>
+                    <div style="background-color: #f3f0ff; color: #6210CC; padding: 15px 25px; border-radius: 5px; display: inline-block; margin-top: 20px; font-size: 24px; font-weight: bold; letter-spacing: 5px;">
+                        ${otp}
+                    </div>
+                </div>
+            `
+        });
+        console.log('✅ Forgot Password Email Sent via Resend:', data.id);
         
         res.status(200).json({ message: "ส่งรหัส OTP ไปยังอีเมลแล้ว" });
 
