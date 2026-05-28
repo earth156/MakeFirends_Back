@@ -66,4 +66,60 @@ router.post('/messages', upload.single('image'), async (req, res) => {
     }
 });
 
+// ==========================================
+// 10. ส่วนระบบแชทส่วนตัว (Private Chat)
+// ==========================================
+
+// --- GET: ดึงข้อความแชทระหว่างเพื่อน 2 คน ---
+router.get('/private_messages/:email1/:email2', async (req, res) => {
+    try {
+        const { email1, email2 } = req.params;
+        const { data, error } = await supabase
+            .from('private_messages')
+            .select('*')
+            // ดึงข้อความที่ฉันเป็นคนส่งให้เพื่อน หรือ เพื่อนเป็นคนส่งให้ฉัน
+            .or(`and(sender_email.eq.${email1},receiver_email.eq.${email2}),and(sender_email.eq.${email2},receiver_email.eq.${email1})`)
+            .order('created_at', { ascending: true }); // เรียงจากเก่าไปใหม่
+
+        if (error) throw error;
+        res.json(data);
+    } catch (err) {
+        console.error("Fetch Private Messages Error:", err.message);
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// --- POST: ส่งข้อความแชทส่วนตัว (รองรับส่งรูปภาพ) ---
+router.post('/private_messages', upload.single('image'), async (req, res) => {
+    try {
+        const { sender_email, receiver_email, text } = req.body;
+        const file = req.file;
+        let imageUrl = null;
+
+        // ถ้ามีการแนบรูปภาพมาด้วย ให้อัปโหลดขึ้น Storage ก่อน
+        if (file) {
+            const fileName = `private_chat_${Date.now()}_${Math.floor(Math.random() * 1000)}.${file.originalname.split('.').pop()}`;
+            const { error: uploadError } = await supabase.storage
+                .from('chat_images')
+                .upload(fileName, file.buffer, { contentType: file.mimetype });
+
+            if (uploadError) throw uploadError;
+            const { data: urlData } = supabase.storage.from('chat_images').getPublicUrl(fileName);
+            imageUrl = urlData.publicUrl;
+        }
+
+        // บันทึกข้อความลงฐานข้อมูล
+        const { data, error } = await supabase
+            .from('private_messages')
+            .insert([{ sender_email, receiver_email, text, image_url: imageUrl }])
+            .select();
+
+        if (error) throw error;
+        res.status(201).json(data[0]);
+    } catch (err) {
+        console.error("Send Private Message Error:", err.message);
+        res.status(500).json({ error: err.message });
+    }
+});
+
 module.exports = router;

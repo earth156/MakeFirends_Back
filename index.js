@@ -27,6 +27,12 @@ app.use('/', require('./routes/messageRoutes'));
 // จัดการระบบแจ้งเตือน, รีวิว และหมวดหมู่กิจกรรม
 app.use('/', require('./routes/notificationRoutes'));
 
+// จัดการรายงานกิจกรรมและผู้เข้าร่วม
+app.use('/', require('./routes/report'));
+
+// จัดการการยืนยันอีเมล
+app.use('/', require('./routes/verificationRoutes'));
+
 // --- 3. Route สำหรับเช็คสถานะการทำงานของ Server ---
 app.get('/', (req, res) => {
     res.send('Server Activity Hub พร้อมใช้งานแล้ว! (โครงสร้างใหม่แบบแยกส่วนเป็นระเบียบ)');

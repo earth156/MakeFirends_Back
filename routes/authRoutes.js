@@ -1,6 +1,8 @@
 const express = require('express');
 const bcrypt = require('bcrypt');
 const jwt = require('jsonwebtoken'); // เพิ่ม JWT
+const crypto = require('crypto'); // เพิ่มสำหรับการสร้าง token ยืนยันอีเมล
+const { sendVerificationEmail } = require('./emailService'); // นำเข้าฟังก์ชันส่งอีเมล
 const supabase = require('../config/supabase');
 const upload = require('../middlewares/upload');
 const router = express.Router();
@@ -48,6 +50,11 @@ router.post('/users', upload.single('image'), async (req, res) => {
         // --- เข้ารหัสผ่านและบันทึกข้อมูล ---
         const hashedPassword = await bcrypt.hash(password, 10);
 
+        // --- สร้าง OTP 6 หลัก สำหรับยืนยันอีเมล ---
+        const otp = Math.floor(100000 + Math.random() * 900000).toString();
+        const hashedVerificationToken = crypto.createHash('sha256').update(otp).digest('hex');
+        const tokenExpires = new Date(Date.now() + 3600000).toISOString(); // หมดอายุใน 1 ชั่วโมง
+
         const { error: dbError } = await supabase
             .from('users')
             .insert([
@@ -58,11 +65,17 @@ router.post('/users', upload.single('image'), async (req, res) => {
                     phone, 
                     dob, 
                     profile_image: imageUrl,
-                    role: 'user'
+                    role: 'user',
+                    is_verified: false,
+                    verification_token: hashedVerificationToken,
+                    verification_token_expires: tokenExpires
                 }
             ]);
 
         if (dbError) throw dbError;
+
+        // --- ส่งอีเมลยืนยัน (ไม่ใช้ await เพื่อไม่ให้แอปต้องรอนาน) ---
+        sendVerificationEmail(email, otp).catch(err => console.error("Send email error:", err));
 
         res.status(201).json({ message: 'ลงทะเบียนสำเร็จ' });
     } catch (err) {
@@ -87,6 +100,12 @@ router.post('/login', async (req, res) => {
         if (!isMatch) {
             return res.status(401).json({ error: "รหัสผ่านไม่ถูกต้อง" });
         }
+
+        // --- เช็คว่าผู้ใช้ยืนยันอีเมลหรือยัง ก่อนที่จะอนุญาตให้ล็อกอิน (ยกเว้น Admin) ---
+        if (user.role !== 'admin' && user.is_verified === false) {
+            return res.status(403).json({ error: 'Email not verified' });
+        }
+
         const token = jwt.sign(
             { id: user.id, email: user.email, role: user.role || 'user' },
             JWT_SECRET,

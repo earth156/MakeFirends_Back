@@ -25,8 +25,8 @@ const startCronJobs = () => {
                             user_email: p.user_email,
                             title: "กิจกรรมเริ่มขึ้นแล้ว!",
                             message: `กิจกรรม "${activity.title}" เริ่มต้นขึ้นแล้ว เข้าไปร่วมสนุกกันเลย`,
-                            activity_id: activity.id,
-                            type: 'activity_started'
+                            type: 'activity_started',
+                            activity_id: activity.id
                         }));
                         await supabase.from('notifications').insert(notifications);
                     }
@@ -55,8 +55,8 @@ const startCronJobs = () => {
                             user_email: p.user_email,
                             title: "กิจกรรมสิ้นสุดลงแล้ว!",
                             message: `กิจกรรม "${activity.title}" จบลงแล้ว มาให้คะแนนเพื่อนในทริปกันเถอะ`,
-                            activity_id: activity.id,
-                            type: 'rating_prompt'
+                            type: 'rating_prompt',
+                            activity_id: activity.id
                         }));
                         await supabase.from('notifications').insert(endNotifications);
                     }
