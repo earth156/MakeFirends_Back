@@ -3,10 +3,21 @@ const nodemailer = require('nodemailer');
 // ตั้งค่า transporter (ตัวส่งอีเมล)
 // คำแนะนำ: ในโหมด Development เราจะใช้ Gmail ไปก่อน
 const transporter = nodemailer.createTransport({
-    service: 'gmail',
+    host: 'smtp.gmail.com',
+    port: 465,
+    secure: true,
     auth: {
         user: 'earthjirawat156@gmail.com', // 👈 ใส่อีเมล Gmail ของคุณ
         pass: 'nvemhaoklqvgumaj'      // 👈 ใส่ App Password (รหัสผ่านแอป) 16 หลัก
+    }
+});
+
+// --- ทดสอบการเชื่อมต่อกับ Gmail เมื่อ Server เริ่มทำงาน ---
+transporter.verify((error, success) => {
+    if (error) {
+        console.error('❌ ตั้งค่า Gmail ผิดพลาด (ตรวจสอบ App Password หรือการตั้งค่าความปลอดภัย):', error.message);
+    } else {
+        console.log('✅ ระบบพร้อมส่งอีเมลผ่าน Gmail แล้ว');
     }
 });
 
