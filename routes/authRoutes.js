@@ -74,8 +74,15 @@ router.post('/users', upload.single('image'), async (req, res) => {
 
         if (dbError) throw dbError;
 
-        // --- ส่งอีเมลยืนยัน (ไม่ใช้ await เพื่อไม่ให้แอปต้องรอนาน) ---
-        sendVerificationEmail(email, otp).catch(err => console.error("Send email error:", err));
+        // --- ส่งอีเมลยืนยัน ---
+        try {
+            await sendVerificationEmail(email, otp);
+        } catch (emailErr) {
+            console.error("Send email error:", emailErr);
+            // หากส่งอีเมลไม่สำเร็จ ให้ลบข้อมูลที่พึ่งบันทึกไปทิ้ง (Rollback)
+            await supabase.from('users').delete().eq('email', email);
+            return res.status(500).json({ error: "ไม่สามารถส่งอีเมลยืนยันได้ โปรดตรวจสอบว่าอีเมลถูกต้องและมีอยู่จริง" });
+        }
 
         res.status(201).json({ message: 'ลงทะเบียนสำเร็จ' });
     } catch (err) {

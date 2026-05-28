@@ -116,9 +116,13 @@ router.post('/resend-verification', async (req, res) => {
     }).eq('email', email);
 
     // ส่งอีเมล
-    await sendVerificationEmail(email, otp);
-
-    res.status(200).json({ message: 'ส่งอีเมลยืนยันอีกครั้งสำเร็จ' });
+    try {
+        await sendVerificationEmail(email, otp);
+        res.status(200).json({ message: 'ส่งอีเมลยืนยันอีกครั้งสำเร็จ' });
+    } catch (emailErr) {
+        console.error('Resend email error:', emailErr);
+        res.status(500).json({ error: 'ไม่สามารถส่งอีเมลได้ โปรดตรวจสอบว่าอีเมลถูกต้องและมีอยู่จริง' });
+    }
 });
 
 module.exports = router;

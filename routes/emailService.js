@@ -33,7 +33,14 @@ const sendVerificationEmail = async (toEmail, otp) => {
         `
     };
 
-    await transporter.sendMail(mailOptions);
+    try {
+        // รอให้ส่งเสร็จและรับค่า info กลับมา
+        const info = await transporter.sendMail(mailOptions);
+        console.log('✅ Email sent successfully to', toEmail, '| Response:', info.response);
+    } catch (error) {
+        console.error('❌ Failed to send email to', toEmail, '| Error:', error.message);
+        throw error; // โยน Error กลับไปให้ authRoutes.js จัดการลบ User ทิ้ง
+    }
 };
 
 module.exports = { sendVerificationEmail };

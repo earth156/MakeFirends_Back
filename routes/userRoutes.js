@@ -562,10 +562,11 @@ router.post('/forgot-password', async (req, res) => {
             text: `รหัส OTP ของคุณคือ: ${otp}\n\nกรุณานำรหัสนี้ไปกรอกในแอปพลิเคชันเพื่อตั้งรหัสผ่านใหม่ครับ`
         };
 
-        transporter.sendMail(mailOptions, (error, info) => {
-            if (error) throw error;
-            res.status(200).json({ message: "ส่งรหัส OTP ไปยังอีเมลแล้ว" });
-        });
+        // ใช้ await แทน callback เพื่อจับ Error ได้ปลอดภัยกว่า
+        const info = await transporter.sendMail(mailOptions);
+        console.log('✅ Forgot Password Email Sent:', info.response);
+        
+        res.status(200).json({ message: "ส่งรหัส OTP ไปยังอีเมลแล้ว" });
 
     } catch (err) {
         console.error("Forgot Password Error:", err);
