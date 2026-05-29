@@ -86,6 +86,11 @@ router.post('/activities', upload.array('images', 5), async (req, res) => {
         const files = req.files;
         let imageUrls = []; 
 
+        const parsedMaxParticipants = parseInt(max_participants);
+        if (isNaN(parsedMaxParticipants) || parsedMaxParticipants <= 1) {
+            return res.status(400).json({ error: 'จำนวนผู้เข้าร่วมต้องมากกว่า 1 คนขึ้นไป' });
+        }
+
         // --- ตรวจสอบว่าถูกแบนอยู่หรือไม่ ---
         const { data: userCheck } = await supabase.from('users').select('banned_until').eq('email', creator_email).single();
         if (userCheck && userCheck.banned_until) {
@@ -212,6 +217,22 @@ router.put('/activities/:id', upload.array('images', 5), async (req, res) => {
             return res.status(400).json({ error: "ไม่สามารถแก้ไขกิจกรรมที่เริ่มไปแล้วหรือจบแล้วได้" });
         }
 
+        // ตรวจสอบจำนวน max_participants ใหม่ ว่าน้อยกว่าคนที่มีอยู่แล้วหรือไม่
+        const parsedMaxParticipants = parseInt(max_participants);
+        if (isNaN(parsedMaxParticipants) || parsedMaxParticipants < 1) {
+            return res.status(400).json({ error: "จำนวนผู้เข้าร่วมต้องไม่น้อยกว่า 1 คน" });
+        }
+
+        const { count: currentParticipants } = await supabase
+            .from('activity_participants')
+            .select('*', { count: 'exact', head: true })
+            .eq('activity_id', id)
+            .eq('status', 'joined');
+
+        if (parsedMaxParticipants < (currentParticipants || 0)) {
+            return res.status(400).json({ error: `ไม่สามารถลดจำนวนผู้เข้าร่วมให้ต่ำกว่าสมาชิกปัจจุบันที่มีอยู่แล้ว (${currentParticipants} คน) ได้` });
+        }
+
         // 2. จัดการรูปภาพ
         let imageUrls = existing_images ? JSON.parse(existing_images) : [];
         if (req.files && req.files.length > 0) {
@@ -226,7 +247,7 @@ router.put('/activities/:id', upload.array('images', 5), async (req, res) => {
         // 3. สร้าง object สำหรับอัปเดต (ไม่รวมวันเวลา)
         const updatePayload = {
             title, description, province, start_datetime, end_datetime,
-            max_participants: parseInt(max_participants),
+            max_participants: parsedMaxParticipants,
             category_tags: JSON.parse(category_tags),
             image_urls: imageUrls,
             min_age: (min_age && min_age !== '') ? parseInt(min_age) : null,
@@ -246,6 +267,57 @@ router.put('/activities/:id', upload.array('images', 5), async (req, res) => {
         }
         
         console.log(`Activity ${id} updated successfully. Now attempting to send notifications.`);
+
+        // ==========================================
+        // 4.5 [เพิ่มใหม่] โค้ดระบบเลื่อนคิวสำรองอัตโนมัติ
+        // ==========================================
+        try {
+            // คำนวณหาที่ว่างที่เพิ่มขึ้น (ใช้จาก updatePayload และ currentParticipants ที่ดึงมาแล้ว)
+            const availableSlots = updatePayload.max_participants - (currentParticipants || 0);
+
+            // ถ้ามีที่ว่าง ให้ดึงคนจากตารางคิวสำรอง (activity_waitlists) ตามจำนวนโควตาที่ว่าง
+            if (availableSlots > 0) {
+                const { data: waitlistUsers } = await supabase
+                    .from('activity_waitlists')
+                    .select('*')
+                    .eq('activity_id', id)
+                    .order('created_at', { ascending: true }) // ดึงคนที่คิวแรกสุดมาก่อน
+                    .limit(availableSlots);
+
+                if (waitlistUsers && waitlistUsers.length > 0) {
+                    for (const user of waitlistUsers) {
+                        // ย้ายคนจากคิวเข้ากลุ่ม (ถ้าต้องรออนุมัติให้เป็น pending ถ้าไม่ต้องให้เป็น joined)
+                        await supabase
+                            .from('activity_participants')
+                            .insert([{
+                                activity_id: id,
+                                user_email: user.user_email,
+                                status: updatePayload.require_approval ? 'pending' : 'joined'
+                            }]);
+
+                        // ลบรายชื่อออกจากตารางคิวสำรองสิทธิ์
+                        await supabase
+                            .from('activity_waitlists')
+                            .delete()
+                            .eq('id', user.id);
+
+                        // ส่งการแจ้งเตือนไปบอกผู้ใช้คนนั้น
+                        await supabase.from('notifications').insert([{
+                            user_email: user.user_email,
+                            title: "คุณได้สิทธิ์เข้าร่วมกิจกรรม!",
+                            message: `มีการขยายจำนวนผู้เข้าร่วมในกิจกรรม "${title}" และคุณได้รับการเลื่อนคิวแล้ว`,
+                            type: 'activity_joined',
+                            activity_id: id,
+                            is_read: false
+                        }]);
+                    }
+                }
+            }
+        } catch (waitlistErr) {
+            console.error("Auto promote waitlist error:", waitlistErr);
+            // ไม่ต้อง throw error เพื่อไม่ให้ขัดจังหวะการบันทึกกิจกรรมหลัก
+        }
+        // ==========================================
 
         // 5. ส่งแจ้งเตือนไปยังผู้เข้าร่วมกิจกรรม (ยกเว้นคนแก้ไข)
         const { data: participants, error: participantsError } = await supabase
@@ -683,14 +755,32 @@ router.post('/leave_activity', async (req, res) => {
 router.post('/leave_waitlist', async (req, res) => {
     try {
         const { activity_id, user_email } = req.body;
-        const { error } = await supabase
+        
+        // ลบข้อมูลการสำรองสิทธิ์
+        const { data, error } = await supabase
             .from('activity_waitlists')
             .delete()
             .eq('activity_id', activity_id)
-            .eq('user_email', user_email);
+            .eq('user_email', user_email)
+            .select();
         
         if (error) throw error;
-        res.status(200).json({ message: 'ยกเลิกคิวสำรองสิทธิ์สำเร็จ' });
+        
+        if (!data || data.length === 0) {
+            return res.status(400).json({ error: 'ไม่พบรายการสำรองสิทธิ์' });
+        }
+
+        // ดึงจำนวนผู้สำรองสิทธิ์ที่เหลืออยู่เพื่อใช้อัปเดต UI 
+        const { count } = await supabase
+            .from('activity_waitlists')
+            .select('*', { count: 'exact', head: true })
+            .eq('activity_id', activity_id);
+
+        res.status(200).json({ 
+            message: 'ยกเลิกคิวสำรองสิทธิ์สำเร็จ',
+            status: 'cancelled',
+            waitlist_count: count || 0
+        });
     } catch (err) {
         res.status(500).json({ error: err.message });
     }
