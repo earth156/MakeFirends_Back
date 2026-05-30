@@ -94,19 +94,101 @@ router.post('/reports', upload.single('image'), async (req, res) => {
 router.get('/reports/activity/:activity_id', async (req, res) => {
     try {
         const { activity_id } = req.params;
-        const { data, error } = await supabase
-            .from('activity_reports')
+        
+        // ใช้ Supabase Query ดึงข้อมูล 3 ส่วน (Activity, Creator, Reports + Reporters) ในครั้งเดียว
+        const { data: activityData, error } = await supabase
+            .from('activities')
             .select(`
-                *,
-                reporter:users!activity_reports_reporter_email_fkey(name, profile_image),
-                reported_user:users!activity_reports_reported_user_email_fkey(name, profile_image)
+                id, title, description, image_urls, start_datetime, status,
+                creator:users!creator_email (name, email, profile_image),
+                reporters:activity_reports (
+                    id, reason, image_url, created_at, status,
+                    reporter:users!activity_reports_reporter_email_fkey (name, email)
+                )
             `)
-            .eq('activity_id', activity_id)
-            .order('created_at', { ascending: false });
+            .eq('id', activity_id)
+            .single();
 
         if (error) throw error;
-        res.json(data);
+        if (!activityData) return res.status(404).json({ error: 'ไม่พบกิจกรรม' });
+
+        // จัดรูปแบบ JSON Response ตามโครงสร้างที่ต้องการ
+        const responseData = {
+            activity: {
+                id: activityData.id,
+                title: activityData.title,
+                description: activityData.description,
+                cover_image: activityData.image_urls && activityData.image_urls.length > 0 ? activityData.image_urls[0] : null,
+                start_datetime: activityData.start_datetime,
+                status: activityData.status,
+                creator: activityData.creator
+            },
+            reporters: (activityData.reporters || []).map(r => ({
+                report_id: r.id,
+                reason: r.reason,
+                evidence_image: r.image_url,
+                reported_at: r.created_at,
+                status: r.status,
+                reporter_name: r.reporter?.name || 'ไม่ระบุตัวตน',
+                reporter_email: r.reporter?.email
+            })).sort((a, b) => new Date(b.reported_at) - new Date(a.reported_at)) // เรียงจากใหม่ไปเก่า
+        };
+
+        res.json(responseData);
     } catch (err) {
+        console.error('Fetch Activity Report Error:', err.message);
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// --- GET: ดึงประวัติการรายงานของผู้ใช้แบบละเอียด (สำหรับ Admin) ---
+router.get('/reports/target-user/:email', async (req, res) => {
+    try {
+        const { email } = req.params;
+
+        // ใช้ Supabase Query ดึงข้อมูลผู้ใช้ที่ถูกรายงาน พร้อมรายการคนที่รายงาน (JOIN 3 แหล่ง)
+        const { data: targetUser, error } = await supabase
+            .from('users')
+            .select(`
+                email, name, profile_image, banned_until, rating,
+                reports:activity_reports!activity_reports_reported_user_email_fkey (
+                    id, reason, image_url, created_at, status,
+                    reporter:users!activity_reports_reporter_email_fkey (name, email, profile_image)
+                )
+            `)
+            .eq('email', email)
+            .single();
+
+        if (error) throw error;
+        if (!targetUser) return res.status(404).json({ error: 'ไม่พบข้อมูลผู้ใช้' });
+
+        // จัดรูปแบบ JSON Response ให้มีโปรไฟล์ผู้ใช้หลัก และ Array ของ Repoters
+        const responseData = {
+            user: {
+                email: targetUser.email,
+                name: targetUser.name,
+                profile_image: targetUser.profile_image,
+                banned_until: targetUser.banned_until,
+                rating: targetUser.rating,
+                status: targetUser.banned_until && new Date(targetUser.banned_until) > new Date() ? 'banned' : 'active'
+            },
+            reporters: (targetUser.reports || [])
+                .map(r => ({
+                    report_id: r.id,
+                    reason: r.reason,
+                    evidence_image: r.image_url,
+                    reported_at: r.created_at,
+                    status: r.status,
+                    reporter_name: r.reporter?.name || 'ไม่ระบุตัวตน',
+                    reporter_email: r.reporter?.email,
+                    reporter_image: r.reporter?.profile_image
+                }))
+                .sort((a, b) => new Date(b.reported_at) - new Date(a.reported_at)) // เรียงล่าสุดขึ้นก่อน
+        };
+
+        res.json(responseData);
+    } catch (err) {
+        console.error('Fetch Target User Report Error:', err.message);
         res.status(500).json({ error: err.message });
     }
 });
@@ -157,7 +239,7 @@ router.get('/reports', async (req, res) => {
 router.put('/reports/:id/status', async (req, res) => {
     try {
         const { id } = req.params;
-        const { status } = req.body; // 'resolved' หรือ 'rejected'
+        const { status } = req.body; // 'resolved', 'rejected', หรือ 'ignored'
 
         // 1. ดึงข้อมูลรายงานเพื่อหาอีเมลผู้รายงาน
         const { data: report, error: fetchError } = await supabase
@@ -177,7 +259,12 @@ router.put('/reports/:id/status', async (req, res) => {
         if (error) throw error;
 
         // 2. ส่งแจ้งเตือนไปยังผู้รายงาน
-        const statusText = status === 'resolved' ? 'ได้รับการดำเนินการแล้ว' : 'ถูกปฏิเสธ (ปัดตก)';
+        let statusText = 'ได้รับการตรวจสอบแล้ว';
+        if (status === 'resolved') {
+            statusText = 'ได้รับการดำเนินการแล้ว';
+        } else if (status === 'rejected' || status === 'ignored') {
+            statusText = 'ถูกเพิกเฉย/ปัดตก';
+        }
         const reportTypeText = report.report_type === 'activity' ? 'กิจกรรม' : 'ผู้ใช้';
         await supabase.from('notifications').insert([{
             user_email: report.reporter_email,
@@ -237,25 +324,40 @@ router.put('/reports/:id/punish', async (req, res) => {
 
         await supabase.from('users').update(updateData).eq('email', targetEmail);
 
-        // 5. เปลี่ยนสถานะใบรายงานเป็น 'จัดการแล้ว'
-        await supabase.from('activity_reports').update({ status: 'resolved' }).eq('id', id);
+        // [อัปเดตใหม่] 5. เปลี่ยนสถานะใบรายงาน "ทั้งหมด" ของผู้ใช้นี้ให้เป็น 'resolved' อัตโนมัติ
+        await supabase
+            .from('activity_reports')
+            .update({ status: 'resolved' })
+            .eq('reported_user_email', targetEmail)
+            .eq('report_type', 'user');
 
         // 6. ส่งแจ้งเตือนบอกผู้ใช้
         await supabase.from('notifications').insert([{
             user_email: targetEmail, title: "บัญชีถูกแบนและลงโทษ", type: "system_alert", is_read: false,
-            message: `คุณถูกหัก 1 ดาว และถูกระงับการสร้าง/เข้าร่วมกิจกรรมเป็นเวลา ${ban_days || 0} วัน เนื่องจากฝ่าฝืนกฎชุมชน`
+            message: `คุณถูกหัก 1 ดาว และถูกระงับการใช้งานแอปเป็นเวลา ${ban_days || 0} วัน เนื่องจากฝ่าฝืนกฎชุมชน`
         }]);
 
-        // 7. ส่งแจ้งเตือนไปยังผู้รายงาน (ว่าดำเนินการแล้ว)
-        await supabase.from('notifications').insert([{
-            user_email: reporterEmail, 
-            title: "อัปเดตสถานะการรายงาน", 
-            type: "system_alert", 
-            is_read: false,
-            message: `รายงานผู้ใช้ของคุณ ได้รับการดำเนินการแล้ว โดยผู้ดูแลระบบ ขอบคุณที่ช่วยดูแลชุมชนของเรา`
-        }]);
+        // 7. ดึงรายชื่อผู้ที่เคยกดรายงานผู้ใช้นี้ทุกคน เพื่อส่งแจ้งเตือนกลับว่าจัดการให้แล้ว
+        const { data: reporters } = await supabase
+            .from('activity_reports')
+            .select('reporter_email')
+            .eq('reported_user_email', targetEmail)
+            .eq('report_type', 'user');
 
-        res.json({ message: "ลงโทษผู้ใช้และจัดการรายงานสำเร็จ" });
+        if (reporters && reporters.length > 0) {
+            // กรองอีเมลที่ซ้ำกันออก (เผื่อ 1 คนรายงานหลายรอบ)
+            const uniqueReporters = [...new Set(reporters.map(r => r.reporter_email))];
+            const notifs = uniqueReporters.map(email => ({
+                user_email: email,
+                title: "อัปเดตสถานะการรายงาน",
+                type: "system_alert",
+                is_read: false,
+                message: `รายงานผู้ใช้ที่คุณแจ้งเข้ามา ได้รับการพิจารณาและระงับบัญชีผู้กระทำผิดแล้ว ขอบคุณที่ช่วยดูแลชุมชนของเรา`
+            }));
+            await supabase.from('notifications').insert(notifs);
+        }
+
+        res.json({ message: "ลงโทษผู้ใช้และจัดการรายงานทั้งหมดสำเร็จ" });
     } catch (err) {
         res.status(500).json({ error: err.message });
     }

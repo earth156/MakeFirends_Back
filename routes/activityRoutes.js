@@ -1111,6 +1111,13 @@ router.put('/activities/:id/suspend', async (req, res) => {
 
         if (updateError) throw updateError;
 
+        // [เพิ่มใหม่] 2.5 อัปเดตสถานะรายงานทั้งหมดที่เกี่ยวข้องกับกิจกรรมนี้ให้เป็น 'resolved' (จัดการแล้ว)
+        await supabase
+            .from('activity_reports')
+            .update({ status: 'resolved' })
+            .eq('activity_id', id)
+            .eq('report_type', 'activity');
+
         const notifications = [];
         
         // 3. แจ้งเตือนไปยังเจ้าของกิจกรรม (พร้อมเหตุผล)
