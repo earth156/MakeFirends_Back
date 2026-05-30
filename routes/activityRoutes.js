@@ -676,6 +676,67 @@ router.put('/activities/:id/approve_all_requests', async (req, res) => {
     }
 });
 
+// --- 6.7 PUT: เตะผู้ใช้ออกจากกิจกรรม (Kick User) ---
+router.put('/activities/:id/kick_user', async (req, res) => {
+    try {
+        const { id } = req.params;
+        const { creator_email, target_user_email } = req.body;
+
+        // 1. ตรวจสอบสิทธิ์
+        const { data: activity } = await supabase.from('activities').select('creator_email, title, status').eq('id', id).single();
+        if (!activity) return res.status(404).json({ error: "ไม่พบกิจกรรม" });
+        if (activity.creator_email !== creator_email) return res.status(403).json({ error: "ไม่มีสิทธิ์ดำเนินการ (เฉพาะผู้จัดเท่านั้น)" });
+        if (activity.status !== 'upcoming') return res.status(400).json({ error: "ไม่สามารถเตะผู้ใช้ได้เนื่องจากกิจกรรมเริ่มหรือจบไปแล้ว" });
+
+        // 2. ดึงชื่อคนที่จะเตะ
+        const { data: targetUser } = await supabase.from('users').select('name').eq('email', target_user_email).single();
+
+        // 3. ลบคนนั้นออกจากผู้เข้าร่วม
+        const { error: deleteError } = await supabase.from('activity_participants').delete().eq('activity_id', id).eq('user_email', target_user_email);
+        if (deleteError) throw deleteError;
+
+        // 4. แจ้งในแชทกลุ่มว่ามีคนถูกเตะ
+        await supabase.from('messages').insert([{
+            activity_id: id, 
+            sender_email: creator_email, 
+            text: `${targetUser ? targetUser.name : 'สมาชิก'} ถูกนำออกจากกลุ่มโดยผู้จัด`, 
+            is_system_message: true,
+            chat_type: 'group'
+        }]);
+
+        // 5. แจ้งเตือนผู้ใช้ว่าถูกเตะ
+        await supabase.from('notifications').insert([{ 
+            user_email: target_user_email, 
+            title: "คุณถูกนำออกจากกิจกรรม", 
+            message: `คุณถูกนำออกจากกิจกรรม "${activity.title}" โดยผู้จัดกิจกรรม`, 
+            type: 'system_alert', 
+            activity_id: id,
+            is_read: false 
+        }]);
+
+        // 6. ไปเช็คว่ามีคนรอในคิวสำรองสิทธิ์ไหม (ดึงคนที่เก่าที่สุด 1 คน)
+        const { data: waitlist } = await supabase.from('activity_waitlists').select('*').eq('activity_id', id).order('created_at', { ascending: true }).limit(1);
+
+        if (waitlist && waitlist.length > 0) {
+            const nextUserEmail = waitlist[0].user_email;
+            const { data: nextUserRecord } = await supabase.from('users').select('name').eq('email', nextUserEmail).single();
+
+            // ย้ายคนในคิวเข้าตาราง participants
+            await supabase.from('activity_participants').insert([{ activity_id: id, user_email: nextUserEmail, status: 'joined' }]);
+            await supabase.from('activity_waitlists').delete().eq('id', waitlist[0].id);
+
+            // แจ้งเตือนผู้ที่ได้เลื่อนคิว
+            await supabase.from('messages').insert([{ activity_id: id, sender_email: nextUserEmail, text: `${nextUserRecord ? nextUserRecord.name : 'สมาชิก'} เข้าร่วมกลุ่ม (เลื่อนจากคิวสำรองสิทธิ์)`, is_system_message: true, chat_type: 'group' }]);
+            await supabase.from('notifications').insert([{ user_email: nextUserEmail, title: "เลื่อนคิวสำเร็จ!", message: `กิจกรรม "${activity.title}" มีที่ว่าง คุณได้รับการเลื่อนคิวเข้าร่วมกิจกรรมแล้ว!`, type: 'activity_joined', activity_id: id, is_read: false }]);
+        }
+
+        res.json({ message: "นำผู้ใช้ออกจากกิจกรรมสำเร็จ" });
+    } catch (err) {
+        console.error("Kick User Error:", err.message);
+        res.status(500).json({ error: err.message });
+    }
+});
+
 // --- 6.1 POST: ออกจากกิจกรรม (และเลื่อนคิวสำรองสิทธิ์อัตโนมัติ) ---
 router.post('/leave_activity', async (req, res) => {
     try {
