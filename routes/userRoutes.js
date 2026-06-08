@@ -690,4 +690,49 @@ router.put('/users/:email/change-password', async (req, res) => {
 });
 
 
+// --- POST: Heartbeat (อัปเดตสถานะออนไลน์) ---
+router.post('/users/heartbeat', async (req, res) => {
+    try {
+        const { email } = req.body;
+        if (!email) return res.status(400).json({ error: 'Email is required' });
+
+        const { error } = await supabase
+            .from('users')
+            .update({ 
+                is_online: true, 
+                last_active: new Date().toISOString() 
+            })
+            .eq('email', email);
+
+        if (error) throw error;
+        res.status(200).json({ message: 'Heartbeat updated' });
+    } catch (err) {
+        console.error("Heartbeat Error:", err);
+        res.status(500).json({ error: "Internal Server Error" });
+    }
+});
+
+// ==========================================
+// ระบบ Background Task: เช็คผู้ใช้ออฟไลน์อัตโนมัติ
+// ==========================================
+setInterval(async () => {
+    try {
+        // เวลาปัจจุบัน ลบด้วย 5 นาที
+        const fiveMinutesAgo = new Date(Date.now() - 5 * 60 * 1000).toISOString();
+        
+        // หากมีผู้ใช้ที่ is_online = true แต่ไม่มีการส่ง Heartbeat มาอัปเดตเกิน 5 นาที จะถูกปรับเป็นออฟไลน์
+        const { error } = await supabase
+            .from('users')
+            .update({ is_online: false })
+            .eq('is_online', true)
+            .lt('last_active', fiveMinutesAgo);
+
+        if (error) {
+            console.error('[System] Error updating offline users:', error.message);
+        }
+    } catch (err) {
+        console.error('[System] Error in offline check cron:', err.message);
+    }
+}, 60 * 1000); // รันระบบตรวจสอบนี้ทุกๆ 1 นาที
+
 module.exports = router;

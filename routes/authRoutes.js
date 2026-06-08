@@ -113,6 +113,9 @@ router.post('/login', async (req, res) => {
             return res.status(403).json({ error: 'Email not verified' });
         }
 
+        // --- อัปเดตสถานะเป็นออนไลน์ ---
+        await supabase.from('users').update({ is_online: true }).eq('email', user.email);
+
         const token = jwt.sign(
             { id: user.id, email: user.email, role: user.role || 'user' },
             JWT_SECRET,
@@ -132,6 +135,20 @@ router.post('/login', async (req, res) => {
         });
     } catch (err) {
         console.error('Login Error:', err.message);
+        res.status(500).json({ error: "Internal Server Error" });
+    }
+});
+
+// --- 3. ROUTE: ออกจากระบบ (LOGOUT) ---
+router.post('/logout', async (req, res) => {
+    try {
+        const { email } = req.body;
+        if (email) {
+            // --- อัปเดตสถานะเป็นออฟไลน์ ---
+            await supabase.from('users').update({ is_online: false }).eq('email', email);
+        }
+        res.status(200).json({ message: 'Logged out successfully' });
+    } catch (err) {
         res.status(500).json({ error: "Internal Server Error" });
     }
 });
