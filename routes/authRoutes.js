@@ -33,13 +33,18 @@ router.post('/users', upload.single('image'), async (req, res) => {
         // --- ตรวจสอบว่าอีเมลหรือเบอร์โทรซ้ำหรือไม่ ---
         const { data: existingUser } = await supabase
             .from('users')
-            .select('email, phone')
+            .select('email, phone, is_verified')
             .or(`email.eq.${email},phone.eq.${phone}`)
             .maybeSingle();
 
         if (existingUser) {
-            if (existingUser.email === email) return res.status(400).json({ error: "อีเมลนี้ถูกใช้งานไปแล้ว" });
-            if (existingUser.phone === phone) return res.status(400).json({ error: "เบอร์โทรศัพท์นี้ถูกใช้งานไปแล้ว" });
+            if (existingUser.is_verified) {
+                if (existingUser.email === email) return res.status(400).json({ error: "อีเมลนี้ถูกใช้งานและยืนยันไปแล้ว" });
+                if (existingUser.phone === phone) return res.status(400).json({ error: "เบอร์โทรศัพท์นี้ถูกใช้งานไปแล้ว" });
+            } else {
+                // หากพบข้อมูลที่ยังไม่ยืนยัน (ผู้ใช้กดย้อนกลับมาสมัครใหม่) ให้ลบข้อมูลเก่าทิ้งเพื่อให้บันทึกทับใหม่ได้
+                await supabase.from('users').delete().eq('email', existingUser.email);
+            }
         }
 
         // --- จัดการรูปโปรไฟล์ ---
