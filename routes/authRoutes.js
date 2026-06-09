@@ -101,7 +101,7 @@ router.post('/users', upload.single('image'), async (req, res) => {
             console.error("Send email error:", emailErr);
             // หากส่งอีเมลไม่สำเร็จ ให้ลบข้อมูลที่พึ่งบันทึกไปทิ้ง (Rollback)
             await supabase.from('users').delete().eq('email', email);
-            return res.status(500).json({ error: "ไม่สามารถส่งอีเมลยืนยันได้ โปรดตรวจสอบว่าอีเมลถูกต้องและมีอยู่จริง" });
+            return res.status(400).json({ error: "อีเมลนี้ไม่มีอยู่จริง หรือกล่องจดหมายไม่สามารถรับข้อความได้" });
         }
 
         res.status(201).json({ message: 'ลงทะเบียนสำเร็จ' });
