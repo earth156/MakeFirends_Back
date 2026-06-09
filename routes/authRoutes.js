@@ -13,7 +13,7 @@ const JWT_SECRET = 'your_activity_hub_secret_key_2026';
 // --- 1. ROUTE: สมัครสมาชิก (REGISTER) ---
 router.post('/users', upload.single('image'), async (req, res) => {
     try {
-        const { email, password, name, phone, dob } = req.body;
+        const { email, password, name, phone, dob, interests } = req.body;
         const file = req.file;
 
         // --- ตรวจสอบว่าอีเมลหรือเบอร์โทรซ้ำหรือไม่ ---
@@ -50,6 +50,11 @@ router.post('/users', upload.single('image'), async (req, res) => {
         // --- เข้ารหัสผ่านและบันทึกข้อมูล ---
         const hashedPassword = await bcrypt.hash(password, 10);
 
+        let parsedInterests = [];
+        if (interests) {
+            parsedInterests = typeof interests === 'string' ? JSON.parse(interests) : interests;
+        }
+
         // --- สร้าง OTP 6 หลัก สำหรับยืนยันอีเมล ---
         const otp = Math.floor(100000 + Math.random() * 900000).toString();
         const hashedVerificationToken = crypto.createHash('sha256').update(otp).digest('hex');
@@ -64,6 +69,7 @@ router.post('/users', upload.single('image'), async (req, res) => {
                     name, 
                     phone, 
                     dob, 
+                    interests: parsedInterests,
                     profile_image: imageUrl,
                     role: 'user',
                     is_verified: false,
