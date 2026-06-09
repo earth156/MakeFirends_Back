@@ -5,6 +5,8 @@ const crypto = require('crypto'); // เพิ่มสำหรับการ�
 const { sendVerificationEmail } = require('./emailService'); // นำเข้าฟังก์ชันส่งอีเมล
 const supabase = require('../config/supabase');
 const upload = require('../middlewares/upload');
+const dns = require('dns');
+const util = require('util');
 const router = express.Router();
 
 // คีย์ลับสำหรับสร้าง Token (ในอนาคตควรเก็บในไฟล์ .env)
@@ -15,6 +17,18 @@ router.post('/users', upload.single('image'), async (req, res) => {
     try {
         const { email, password, name, phone, dob, interests } = req.body;
         const file = req.file;
+
+        // --- ตรวจสอบว่าโดเมนอีเมลมีอยู่จริงหรือไม่ (Check MX Records) ---
+        const resolveMx = util.promisify(dns.resolveMx);
+        const domain = email.split('@')[1];
+        try {
+            const addresses = await resolveMx(domain);
+            if (!addresses || addresses.length === 0) {
+                return res.status(400).json({ error: "ไม่พบผู้ให้บริการอีเมลนี้ (โดเมนไม่มีอยู่จริง)" });
+            }
+        } catch (err) {
+            return res.status(400).json({ error: "อีเมลนี้ไม่มีอยู่จริง หรือโดเมนไม่ถูกต้อง กรุณาตรวจสอบอีกครั้ง" });
+        }
 
         // --- ตรวจสอบว่าอีเมลหรือเบอร์โทรซ้ำหรือไม่ ---
         const { data: existingUser } = await supabase
