@@ -10,7 +10,7 @@ router.get('/users', async (req, res) => {
         const { search, exclude_email } = req.query;
         let query = supabase
             .from('users')
-            .select('name, email, profile_image, university, bio, banned_until')
+            .select('name, email, profile_image, university, bio, banned_until, is_online, last_active')
             .neq('role', 'admin') // ซ่อนบัญชี admin ไม่ให้แสดงในการค้นหาเพิ่มเพื่อน
             .order('name', { ascending: true });
 
@@ -377,7 +377,7 @@ router.get('/users/:email/friends', async (req, res) => {
 
         // 3. ดึงข้อมูลโปรไฟล์ของเพื่อนจากอีเมลที่หาได้
         const { data: usersData, error: usersError } = await supabase.from('users')
-            .select('name, profile_image, email, banned_until')
+            .select('name, profile_image, email, banned_until, is_online, last_active')
             .in('email', friendEmails);
             
         if (usersError) {
