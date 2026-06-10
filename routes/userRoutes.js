@@ -735,4 +735,39 @@ setInterval(async () => {
     }
 }, 60 * 1000); // รันระบบตรวจสอบนี้ทุกๆ 1 นาที
 
+// --- POST: ตรวจสอบสถานะผู้ใช้ (สำหรับ Real-time Ban) ---
+router.post('/users/status/check', async (req, res) => {
+    try {
+        const { email } = req.body;
+        if (!email) {
+            return res.status(400).json({ error: 'Email is required' });
+        }
+
+        const { data: user, error } = await supabase
+            .from('users')
+            .select('banned_until')
+            .eq('email', email)
+            .single();
+
+        if (error || !user) {
+            // หากไม่พบผู้ใช้ อาจเป็นเพราะถูกลบไปแล้ว
+            return res.status(404).json({ error: 'User not found' });
+        }
+
+        // ตรวจสอบว่าการแบนยังไม่หมดอายุ
+        const isBanned = user.banned_until && new Date(user.banned_until) > new Date();
+
+        if (isBanned) {
+            return res.status(403).json({ 
+                banned: true, 
+                message: 'บัญชีของคุณถูกระงับการใช้งาน',
+                banned_until: user.banned_until
+            });
+        }
+        res.status(200).json({ banned: false });
+    } catch (err) {
+        res.status(500).json({ error: "Internal Server Error" });
+    }
+});
+
 module.exports = router;
