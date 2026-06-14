@@ -20,7 +20,10 @@ function getDistance(lat1, lon1, lat2, lon2) {
 // --- 1. GET: ดึงรายการกิจกรรมทั้งหมด (Discovery Feed) ---
 router.get('/activities', async (req, res) => {
     try {
-        const { search, category, province, user_interests, lat, lng, radius } = req.query;
+        const { 
+            search, category, province, user_interests, lat, lng, radius,
+            page = 1, limit = 10, user_email, date, time
+        } = req.query;
         const now = new Date().toISOString(); 
 
         let query = supabase
@@ -31,18 +34,55 @@ router.get('/activities', async (req, res) => {
                 participants:activity_participants(user_email, status, user:users(name, profile_image, banned_until))
             `)
             .gt('end_datetime', now) // แสดงเฉพาะกิจกรรมที่ยังไม่จบ
-            .neq('status', 'suspended'); // ซ่อนกิจกรรมที่ถูกระงับ
+            .neq('status', 'suspended') // ซ่อนกิจกรรมที่ถูกระงับ
+            .neq('status', 'in_progress'); // สถานะต้องไม่เป็น in_progress
 
+        // --- 1. การกรองระดับ Database ---
+        
+        // กิจกรรมที่ตัวเองไม่ได้เป็นคนสร้าง
+        if (user_email) query = query.neq('creator_email', user_email);
+
+        // คำค้นหาหลัก (Search)
         if (search) query = query.ilike('title', `%${search}%`);
+        
+        // หมวดหมู่และจังหวัด
         if (category && category !== 'ทั้งหมด') query = query.contains('category_tags', [category]);
-        if (province && province !== 'ทั้งหมด') query = query.eq('province', province);
+        if (province && province !== 'ทั้งหมด') query = query.ilike('province', `%${province}%`);
+
+        // วันที่
+        if (date) {
+            query = query.gte('start_datetime', `${date}T00:00:00`)
+                         .lte('start_datetime', `${date}T23:59:59`);
+        }
 
         const { data, error } = await query.order('start_datetime', { ascending: true });
         if (error) throw error;
 
         let finalData = data || [];
 
-        // ตรรกะการกรองด้วยระยะทาง GPS (ถ้าแอปส่งพิกัดมา)
+        // --- 2. การกรองเชิงซ้อนและจัดเรียงในฝั่ง Node.js ---
+
+        // กรองกิจกรรมที่ผู้ใช้เข้าร่วมไปแล้วออก (เช็คจากตาราง participants)
+        if (user_email) {
+            finalData = finalData.filter(act => {
+                const participants = act.participants || [];
+                return !participants.some(p => p.user_email === user_email);
+            });
+        }
+
+        // กรองด้วยเวลาตั้งแต่ (Time)
+        if (time) {
+            finalData = finalData.filter(act => {
+                if (!act.start_datetime) return false;
+                const actTime = new Date(act.start_datetime);
+                const [selHour, selMin] = time.split(':').map(Number);
+                const actMins = actTime.getHours() * 60 + actTime.getMinutes();
+                const selMins = selHour * 60 + selMin;
+                return actMins >= selMins;
+            });
+        }
+
+        // ตรรกะการกรองด้วยระยะทาง GPS
         if (lat && lng && radius) {
             const userLat = parseFloat(lat);
             const userLng = parseFloat(lng);
