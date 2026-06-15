@@ -48,7 +48,7 @@ router.post('/users', upload.single('image'), otpLimiter, async (req, res) => {
         // --- ตรวจสอบว่าอีเมลหรือเบอร์โทรซ้ำหรือไม่ ---
         const { data: existingUser } = await supabase
             .from('users')
-            .select('email, phone, is_verified')
+            .select('email, phone, is_verified, verification_token_expires')
             .or(`email.eq.${email},phone.eq.${phone}`)
             .maybeSingle();
 
@@ -57,7 +57,19 @@ router.post('/users', upload.single('image'), otpLimiter, async (req, res) => {
                 if (existingUser.email === email) return res.status(400).json({ error: "อีเมลนี้ถูกใช้งานและยืนยันไปแล้ว" });
                 if (existingUser.phone === phone) return res.status(400).json({ error: "เบอร์โทรศัพท์นี้ถูกใช้งานไปแล้ว" });
             } else {
-                // หากพบข้อมูลที่ยังไม่ยืนยัน (ผู้ใช้กดย้อนกลับมาสมัครใหม่) ให้ลบข้อมูลเก่าทิ้งเพื่อให้บันทึกทับใหม่ได้
+                // หากพบข้อมูลที่ยังไม่ยืนยัน ให้ตรวจสอบว่า OTP เดิมหมดอายุหรือยัง
+                if (existingUser.verification_token_expires) {
+                    const expiresAt = new Date(existingUser.verification_token_expires);
+                    const now = new Date();
+                    
+                    if (expiresAt > now) {
+                        return res.status(400).json({ 
+                            error: "อีเมลนี้กำลังรอการยืนยัน OTP กรุณาลองใหม่ในภายหลัง หรือไปหน้าเข้าสู่ระบบ" 
+                        });
+                    }
+                }
+                
+                // หาก OTP หมดอายุไปแล้ว ให้ลบข้อมูลเก่าทิ้งเพื่อให้คนใหม่บันทึกทับได้
                 await supabase.from('users').delete().eq('email', existingUser.email);
             }
         }
