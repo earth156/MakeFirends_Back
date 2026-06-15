@@ -5,6 +5,9 @@ const startCronJobs = require('./cron/activityCron');
 const app = express();
 const port = 3000;
 
+// --- สำคัญ: ตั้งค่า Trust Proxy สำหรับ Render เพื่อให้อ่าน IP ผู้ใช้ได้ถูกต้อง ---
+app.set('trust proxy', 1);
+
 // --- 1. ตั้งค่า Middleware ---
 app.use(cors());
 app.use(express.json());

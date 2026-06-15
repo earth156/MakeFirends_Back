@@ -3,6 +3,14 @@ const supabase = require('../config/supabase');
 const upload = require('../middlewares/upload');
 const router = express.Router();
 const bcrypt = require('bcrypt'); // เพิ่มไลบรารีสำหรับเข้ารหัสผ่าน
+const rateLimit = require('express-rate-limit');
+
+// --- Limiter สำหรับขอ OTP ลืมรหัสผ่าน (3 ครั้ง / 5 นาที) ---
+const otpLimiter = rateLimit({
+    windowMs: 5 * 60 * 1000, // 5 นาที
+    max: 3, // สูงสุด 3 ครั้ง
+    message: { error: 'คุณขอ OTP บ่อยเกินไป กรุณารอ 5 นาทีแล้วลองใหม่' }
+});
 
 // --- 1. GET: ค้นหาสมาชิกทั้งหมด ---
 router.get('/users', async (req, res) => {
@@ -526,7 +534,7 @@ router.post('/private_messages', upload.single('image'), async (req, res) => {
 });
 
 // --- POST: ขอรีเซ็ตรหัสผ่าน (ลืมรหัสผ่าน) ---
-router.post('/forgot-password', async (req, res) => {
+router.post('/forgot-password', otpLimiter, async (req, res) => {
     try {
         const { email } = req.body;
         if (!email) return res.status(400).json({ error: "กรุณาระบุอีเมล" });

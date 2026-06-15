@@ -8,12 +8,27 @@ const upload = require('../middlewares/upload');
 const dns = require('dns');
 const util = require('util');
 const router = express.Router();
+const rateLimit = require('express-rate-limit');
+
+// --- 1. Limiter สำหรับขอ OTP / สมัครสมาชิก (3 ครั้ง / 5 นาที) ---
+const otpLimiter = rateLimit({
+    windowMs: 5 * 60 * 1000, // 5 นาที
+    max: 3, // สูงสุด 3 ครั้ง
+    message: { error: 'คุณทำรายการบ่อยเกินไป กรุณารอ 5 นาทีแล้วลองใหม่' }
+});
+
+// --- 2. Limiter สำหรับ Login (5 ครั้ง / 10 นาที) ---
+const loginLimiter = rateLimit({
+    windowMs: 10 * 60 * 1000, // 10 นาที
+    max: 5, // สูงสุด 5 ครั้ง
+    message: { error: 'เข้าสู่ระบบผิดพลาดบ่อยเกินไป กรุณารอ 10 นาที' }
+});
 
 // คีย์ลับสำหรับสร้าง Token (ในอนาคตควรเก็บในไฟล์ .env)
 const JWT_SECRET = 'your_activity_hub_secret_key_2026';
 
 // --- 1. ROUTE: สมัครสมาชิก (REGISTER) ---
-router.post('/users', upload.single('image'), async (req, res) => {
+router.post('/users', upload.single('image'), otpLimiter, async (req, res) => {
     try {
         const { email, password, name, phone, dob, interests } = req.body;
         const file = req.file;
@@ -116,7 +131,7 @@ router.post('/users', upload.single('image'), async (req, res) => {
     }
 });
 
-router.post('/login', async (req, res) => {
+router.post('/login', loginLimiter, async (req, res) => {
     try {
         const { email, password } = req.body;
         const { data: user, error } = await supabase

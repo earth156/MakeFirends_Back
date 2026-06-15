@@ -2,6 +2,16 @@ const express = require('express');
 const supabase = require('../config/supabase');
 const upload = require('../middlewares/upload');
 const router = express.Router();
+const rateLimit = require('express-rate-limit');
+
+// --- ตัวตั้งค่า Rate Limit สำหรับค้นหา/ดึงกิจกรรม ---
+const searchLimiter = rateLimit({
+    windowMs: 1 * 60 * 1000, // 1 นาที
+    max: 100, // จำกัด 100 ครั้งต่อ 1 IP
+    message: { error: 'คุณดึงข้อมูลถี่เกินไป กรุณารอสักครู่แล้วลองใหม่' },
+    standardHeaders: true, // ส่ง Rate limit info กลับไปใน header (RateLimit-*)
+    legacyHeaders: false, // ปิดการส่ง header แบบเก่า (X-RateLimit-*)
+});
 
 // --- ฟังก์ชันคำนวณระยะทาง (Haversine Formula) ---
 function getDistance(lat1, lon1, lat2, lon2) {
@@ -18,7 +28,7 @@ function getDistance(lat1, lon1, lat2, lon2) {
 }
 
 // --- 1. GET: ดึงรายการกิจกรรมทั้งหมด (Discovery Feed) ---
-router.get('/activities', async (req, res) => {
+router.get('/activities', searchLimiter, async (req, res) => {
     try {
         const { 
             search, category, province, user_interests, lat, lng, radius,
