@@ -61,8 +61,9 @@ router.get('/activities', searchLimiter, async (req, res) => {
 
         // วันที่
         if (date) {
-            query = query.gte('start_datetime', `${date}T00:00:00`)
-                         .lte('start_datetime', `${date}T23:59:59`);
+            // เติม +07:00 เพื่อบอกฐานข้อมูลว่าเป็นเวลาประเทศไทย ป้องกันปัญหากรองวันผิดเพี้ยน
+            query = query.gte('start_datetime', `${date}T00:00:00+07:00`)
+                         .lte('start_datetime', `${date}T23:59:59+07:00`);
         }
 
         const { data, error } = await query.order('start_datetime', { ascending: true });
@@ -86,7 +87,10 @@ router.get('/activities', searchLimiter, async (req, res) => {
                 if (!act.start_datetime) return false;
                 const actTime = new Date(act.start_datetime);
                 const [selHour, selMin] = time.split(':').map(Number);
-                const actMins = actTime.getHours() * 60 + actTime.getMinutes();
+                
+                // ดึงเวลาแบบ UTC แล้วบวก 7 ชั่วโมงให้เป็นเวลาประเทศไทย (ป้องกันปัญหา Server อยู่ต่างประเทศ)
+                const thaiHours = (actTime.getUTCHours() + 7) % 24;
+                const actMins = thaiHours * 60 + actTime.getUTCMinutes();
                 const selMins = selHour * 60 + selMin;
                 return actMins >= selMins;
             });
